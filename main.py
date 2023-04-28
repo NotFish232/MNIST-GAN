@@ -38,7 +38,7 @@ class MNISTDataset(Dataset):
         if self.transforms is not None:
             img = self.transforms(img)
         if self.target_transforms is not None:
-            img = self.target_transforms(img)
+            label = self.target_transforms(label)
 
         return img, label
 
