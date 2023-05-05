@@ -1,5 +1,6 @@
 import torch as T
 from torch import nn, optim
+from torch.cuda import amp
 from torch.nn import functional as F
 from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader, random_split
@@ -13,7 +14,7 @@ from matplotlib import pyplot as plt
 LATENT_DIM: int = 128
 BATCH_SIZE: int = 128
 IMG_SIZE: int = 28
-EPOCHS: int = 25
+EPOCHS: int = 100
 LR: float = 5e-4
 
 
@@ -63,7 +64,6 @@ class Generator(nn.Module):
 
         return x
 
-
 class Discriminator(nn.Module):
     def __init__(self: Self) -> None:
         super().__init__()
@@ -74,6 +74,7 @@ class Discriminator(nn.Module):
         self.p2: nn.MaxPool2d = nn.MaxPool2d(kernel_size=2)
         self.fc1: nn.Linear = nn.Linear(320, 50)
         self.fc2: nn.Linear = nn.Linear(50, 1)
+
 
     def forward(self: Self, x: T.Tensor) -> T.Tensor:
         x = F.relu(self.p1(F.dropout2d(self.c1(x))))
@@ -99,17 +100,23 @@ def main() -> None:
         ]
     )
     dataset: MNISTDataset = MNISTDataset(transforms=t)
-    train_dataset, test_dataset = random_split(dataset, [0.75, 0.25])
+    train_dataset, test_dataset = random_split(dataset, [0.99, 0.01])
     train_dataloader: DataLoader = DataLoader(train_dataset, BATCH_SIZE)
     test_dataloader: DataLoader = DataLoader(test_dataset, 50)
 
     generator: Generator = Generator(LATENT_DIM).to(device)
     discriminator: Discriminator = Discriminator().to(device)
+    generator.load_state_dict(T.load("trained_generator.pt", map_location=device))
+    discriminator.load_state_dict(T.load("trained_discriminator.pt", map_location=device))
 
     criterion: nn.BCELoss = nn.BCELoss()
     gen_optim: optim.Adam = optim.Adam(generator.parameters(), LR)
+    gen_scaler: amp.GradScaler = amp.GradScaler()
     disc_optim: optim.Adam = optim.Adam(discriminator.parameters(), LR)
+    disc_scaler: amp.GradScaler = amp.GradScaler()
 
+    generator.train()
+    discriminator.train()
     for epoch in range(1, EPOCHS + 1):
         for imgs, labels in train_dataloader:
             z: T.Tensor = T.randn((imgs.size(0), LATENT_DIM), device=device)
@@ -118,25 +125,30 @@ def main() -> None:
 
             # train generator
             gen_optim.zero_grad()
-            fake_imgs: T.Tensor = generator(z)
-            y_fake_hat: T.Tensor = discriminator(fake_imgs)
-            gen_loss: T.Tensor = criterion(y_fake_hat, ones)
-            gen_loss.backward()
-            gen_optim.step()
+            with amp.autocast():
+                fake_imgs: T.Tensor = generator(z)
+                y_fake_hat: T.Tensor = discriminator(fake_imgs)
+                gen_loss: T.Tensor = criterion(y_fake_hat, ones)
+            gen_scaler.scale(gen_loss).backward()
+            gen_scaler.step(gen_optim)
+            gen_scaler.update()
 
             # train discriminator
             disc_optim.zero_grad()
-            real_loss: T.Tensor = criterion(discriminator(imgs), ones)
-            fake_loss: T.Tensor = criterion(discriminator(fake_imgs.detach()), zeros)
-            disc_loss: T.Tensor = (real_loss + fake_loss) / 2
-            disc_loss.backward()
-            disc_optim.step()
+            with amp.autocast():
+                real_loss: T.Tensor = criterion(discriminator(imgs), ones)
+                fake_loss: T.Tensor = criterion(discriminator(fake_imgs.detach()), zeros)
+                disc_loss: T.Tensor = (real_loss + fake_loss) / 2
+            disc_scaler.scale(disc_loss).backward()
+            disc_scaler.step(disc_optim)
+            disc_scaler.update()
 
-        print(f"Epoch {epoch}")
+        print(f"Epoch {epoch} ({gen_loss.item():.3f} vs {disc_loss.item():.3f})")
     
-    T.save(generator.state_dict(), "trained_generator.pt")
-    T.save(discriminator.state_dict(), "trained_discriminator.pt")
+    #T.save(generator.state_dict(), "trained_generator.pt")
+    #T.save(discriminator.state_dict(), "trained_discriminator.pt")
 
+    generator.eval()
     z: T.Tensor = T.randn((25, LATENT_DIM), device=device)
     with T.no_grad():
         imgs: T.Tensor = generator(z)
