@@ -14,7 +14,7 @@ from matplotlib import pyplot as plt
 LATENT_DIM: int = 128
 BATCH_SIZE: int = 128
 IMG_SIZE: int = 28
-EPOCHS: int = 100
+EPOCHS: int = 0
 LR: float = 5e-4
 
 
@@ -109,7 +109,7 @@ def main() -> None:
     generator.load_state_dict(T.load("trained_generator.pt", map_location=device))
     discriminator.load_state_dict(T.load("trained_discriminator.pt", map_location=device))
 
-    criterion: nn.BCELoss = nn.BCELoss()
+    criterion: nn.BCEWithLogitsLoss = nn.BCEWithLogitsLoss()
     gen_optim: optim.Adam = optim.Adam(generator.parameters(), LR)
     gen_scaler: amp.GradScaler = amp.GradScaler()
     disc_optim: optim.Adam = optim.Adam(discriminator.parameters(), LR)
@@ -151,7 +151,8 @@ def main() -> None:
     generator.eval()
     z: T.Tensor = T.randn((25, LATENT_DIM), device=device)
     with T.no_grad():
-        imgs: T.Tensor = generator(z)
+        imgs: T.Tensor = next(iter(train_dataloader))[0][:25]
+        print(imgs.shape)
     imgs = 255 * imgs.cpu().reshape((-1, IMG_SIZE, IMG_SIZE))
     _, subplt = plt.subplots(5, 5)
     for i in range(5):
