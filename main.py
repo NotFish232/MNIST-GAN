@@ -14,7 +14,7 @@ from matplotlib import pyplot as plt
 LATENT_DIM: int = 128
 BATCH_SIZE: int = 128
 IMG_SIZE: int = 28
-EPOCHS: int = 0
+EPOCHS: int = 200
 LR: float = 5e-4
 
 
@@ -151,8 +151,7 @@ def main() -> None:
     generator.eval()
     z: T.Tensor = T.randn((25, LATENT_DIM), device=device)
     with T.no_grad():
-        imgs: T.Tensor = next(iter(train_dataloader))[0][:25]
-        print(imgs.shape)
+        imgs: T.Tensor = generator(z)
     imgs = 255 * imgs.cpu().reshape((-1, IMG_SIZE, IMG_SIZE))
     _, subplt = plt.subplots(5, 5)
     for i in range(5):
